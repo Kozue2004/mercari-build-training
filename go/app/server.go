@@ -54,7 +54,7 @@ func (s Server) Run() int {
 	mux.HandleFunc("GET /items", h.GetItems)//add in 4-3
 	mux.HandleFunc("GET /images/{filename}", h.GetImage)
 	mux.HandleFunc("GET /items/{item_id}", h.GetItem)
-	mux.HandleFunc("GET /search", h.Search)
+	mux.HandleFunc("GET /search", h.Search)//add in STEP5
 
 	// start the server
 	slog.Info("http server started on", "port", s.Port)
@@ -154,9 +154,17 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 	 	return
 	}
 
+	//get category_id
+	var categoryID int
+	err = s.itemRepo.GetCategoryID(ctx, req.Category, &categoryID)
+	if err != nil{
+		http.Error(w, "failed to get category ID", http.StatusInternalServerError)
+		return
+	}
+
 	item := &Item{
 		Name: req.Name,
-		Category: req.Category,// STEP 4-2: add a category field
+		CategoryID: categoryID,// STEP 4-2: add a category field
 		Image : filePath,// STEP 4-4: add an image field
 	}
 	message := fmt.Sprintf("item received: %s", item.Name)
@@ -308,7 +316,7 @@ func parseGetItemRequest(r *http.Request) (int, error) {
 	return itemID, nil
 }
 
-// GetItem is a handler to return an item information for GET /images/{item_id} .
+// GetItem is a handler to return an item information for GET /images/{item_id}.(for STEP 4-5)
 func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -335,26 +343,48 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp)
 }
 
-func (s *Handlers) Search(w http.ResponseWriter, r *http.Request){
+func (s *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	keyword := r.URL.Query().Get("keyword")
-	if keyword == ""{
+	if keyword == "" {
 		http.Error(w, "keyword is required", http.StatusBadRequest)
-		return 
-	}
-
-	items, err := s.itemRepo.SearchByKeyword(ctx, keyword)
-	if err != nil{
-		http.Error(w, "failed to search items", http.StatusInternalServerError)
 		return
 	}
 
-	resp := struct{
-		Items []Item `json:"items"`
-	}{Items: items}
+	rows, err := s.itemRepo.SearchByKeyword(ctx, keyword)
+	if err != nil {
+		http.Error(w, "failed to search items", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() 
 
+	type itemResponse struct {
+		ID       int    `json:"-"`
+		Name     string `json:"name"`
+		Category string `json:"category"`
+		Image    string `json:"image_name"`
+	}
+
+	var responseItems []itemResponse
+	for rows.Next() {
+		var item itemResponse
+		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.Image); err != nil {
+			http.Error(w, "failed to scan item", http.StatusInternalServerError)
+			return
+		}
+		responseItems = append(responseItems, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, "error iterating through items", http.StatusInternalServerError)
+		return
+	}
+
+	resp := struct {
+		Items []itemResponse `json:"items"`
+	}{Items: responseItems}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
-
-

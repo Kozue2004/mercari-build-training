@@ -16,7 +16,14 @@ var db *sql.DB
 type Item struct {
 	ID       int    `db:"id" json:"-"`
 	Name     string `db:"name" json:"name"`
-	Category string `db:"category" json:"category"`
+	CategoryID int `db:"category_id" json:"category_id"`
+	Image    string `db:"image_name" json:"image_name"`
+}
+
+type ItemName struct{
+	ID       int    `db:"id" json:"-"`
+	Name     string `db:"name" json:"name"`
+	Category string `db:"category" json:"category"` 
 	Image    string `db:"image_name" json:"image_name"`
 }
 
@@ -28,7 +35,8 @@ type ItemRepository interface {
 	Insert(ctx context.Context, item *Item) error
 	GetAll(ctx context.Context) ([]Item, error)
 	GetByID(ctx context.Context, itemID int) (*Item, error)
-	SearchByKeyword(ctx context.Context, keyword string) ([]Item, error)
+	GetCategoryID(ctx context.Context, categoryName string, categoryID *int) error
+	SearchByKeyword(ctx context.Context, keyword string) (*sql.Rows, error)
 }
 
 // itemRepository is an implementation of ItemRepository
@@ -43,8 +51,9 @@ func NewItemRepository(database *sql.DB) ItemRepository {
 
 // Insert inserts an item into the repository.
 func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
+
 	// STEP 5-1: add an implementation to store an item
-	_, err := i.db.ExecContext(ctx, "INSERT INTO items (name, category, image_name) VALUES (?, ?, ?)", item.Name, item.Category, item.Image)
+	_, err := i.db.ExecContext(ctx, "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)", item.Name, item.CategoryID, item.Image)
 	if err != nil{
 		return fmt.Errorf("failed to insert item :%w",err)
 	}
@@ -52,7 +61,10 @@ func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
 }
 
 func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
-	rows, err := i.db.QueryContext(ctx, "SELECT id, name, category, image_name FROM items")
+	rows, err := i.db.QueryContext(ctx, `
+		SELECT items.id, items.name, categories.categoryname AS category, items.image_name FROM items
+		JOIN categories ON items.category_id = categories.id
+	`)
 	if err != nil{
 		return nil, fmt.Errorf("failed to get items: %w", err)
 	}
@@ -61,7 +73,10 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 	var items []Item
 	for rows.Next(){
 		var item Item
-		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.Image); err != nil{
+		if err := rows.Scan(ctx, `SELECT items.id, items.name, categories.name 
+			FROM items 
+			JOIN categories ON items.category_id = categories.id;
+			`); err != nil{
 			return nil, fmt.Errorf("failed to scan item: %w", err)
 		}
 		items = append(items, item)
@@ -77,7 +92,10 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 func (i *itemRepository) GetByID(ctx context.Context, itemID int) (*Item, error) {
     var item Item
     err := i.db.QueryRowContext(ctx, "SELECT id, name, category, image FROM items WHERE id = ?", itemID).
-        Scan(&item.ID, &item.Name, &item.Category, &item.Image)
+        Scan(`SELECT items.id, items.name, categories.name 
+			FROM items 
+			JOIN categories ON items.category_id = categories.id;	
+		`)
 
     if err != nil {
         if errors.Is(err, sql.ErrNoRows) {
@@ -88,27 +106,35 @@ func (i *itemRepository) GetByID(ctx context.Context, itemID int) (*Item, error)
     return &item, nil
 }
 
-func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) ([]Item, error){
-	rows, err := i.db.QueryContext(ctx, "SELECT id, name, category, image_name FROM items WHERE name LIKE ?", "%"+keyword+"%")
+//get the category_id based on category
+func (i *itemRepository) GetCategoryID(ctx context.Context, categoryName string, categoryID *int) error {
+	err := i.db.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", categoryName).Scan(categoryID)
 	if err != nil{
-		return nil, fmt.Errorf("failed to search items: %w", err)
-	}
-	defer rows.Close()
-
-	var items []Item
-	for rows.Next(){
-		var item Item
-		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.Image); err != nil{
-			return nil, fmt.Errorf("failed to scan item: %w", err)
+		if errors.Is(err, sql.ErrNoRows){
+			res, err := i.db.ExecContext(ctx, "INSERT INTO categories (name) VALUES (?)", categoryName)
+			if err != nil{
+				return fmt.Errorf("failed to insert category: %w", err)
+			}
+			id, err := res.LastInsertId()
+			if err != nil{
+				return fmt.Errorf("failed to get category id: %w", err)
+			}
+			*categoryID = int(id)
+		} else {
+			return fmt.Errorf("failed to get category id: %w", err)
 		}
-		items = append(items, item)
 	}
+	return nil
+}
 
-	if err := rows.Err(); err != nil{
-		return nil, fmt.Errorf("rows interaction error: %w",err)
-	}
+func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) (*sql.Rows, error){
+	rows, err := i.db.QueryContext(ctx, `
+	SELECT items.id, items.name, categories.name, items.image_name
+	FROM items
+	JOIN categories ON items.category_id = categories.id
+	WHERE items.name LIKE ?`, "%"+keyword+"%")
 
-	return items, nil
+	return rows, err
 }
 
 
@@ -136,21 +162,28 @@ func InitDB(dbPath string) (*sql.DB, error){
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	createTableQuery := `
+	createCategoriesTableQuery :=`
+	CREATE TABLE IF NOT EXISTS categories(
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL
+	);`
+	_, err = database.Exec(createCategoriesTableQuery)
+	if err != nil{
+		return nil, fmt.Errorf("failed to create categories table: %w", err)
+	}
+
+	createItemsTableQuery := `
 	CREATE TABLE IF NOT EXISTS items(
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
-		category TEXT NOT NULL,
-		image_name TEXT NOT NULL
+		category_id INTEGER NOT NULL,
+		image_name TEXT NOT NULL,
+		FOREIGN KEY (category_id) REFERENCES categories(id)
 	);`
-	_, err = database.Exec(createTableQuery)
+	_, err = database.Exec(createItemsTableQuery)
 	if err != nil{
-		return nil, fmt.Errorf("failed to create table: %w", err)
+		return nil, fmt.Errorf("failed to create item table: %w", err)
 	}
 
 	return database, nil
 }
-
-
-
-
