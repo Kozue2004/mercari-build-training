@@ -28,6 +28,7 @@ type ItemRepository interface {
 	Insert(ctx context.Context, item *Item) error
 	GetAll(ctx context.Context) ([]Item, error)
 	GetByID(ctx context.Context, itemID int) (*Item, error)
+	SearchByKeyword(ctx context.Context, keyword string) ([]Item, error)
 }
 
 // itemRepository is an implementation of ItemRepository
@@ -73,6 +74,44 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 	return items, nil
 }
 
+func (i *itemRepository) GetByID(ctx context.Context, itemID int) (*Item, error) {
+    var item Item
+    err := i.db.QueryRowContext(ctx, "SELECT id, name, category, image FROM items WHERE id = ?", itemID).
+        Scan(&item.ID, &item.Name, &item.Category, &item.Image)
+
+    if err != nil {
+        if errors.Is(err, sql.ErrNoRows) {
+            return nil, fmt.Errorf("item not found")
+        }
+        return nil, fmt.Errorf("failed to query item: %w", err)
+    }
+    return &item, nil
+}
+
+func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) ([]Item, error){
+	rows, err := i.db.QueryContext(ctx, "SELECT id, name, category, image_name FROM items WHERE name LIKE ?", "%"+keyword+"%")
+	if err != nil{
+		return nil, fmt.Errorf("failed to search items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []Item
+	for rows.Next(){
+		var item Item
+		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.Image); err != nil{
+			return nil, fmt.Errorf("failed to scan item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil{
+		return nil, fmt.Errorf("rows interaction error: %w",err)
+	}
+
+	return items, nil
+}
+
+
 // StoreImage stores an image and returns an error if any.
 // This package doesn't have a related interface for simplicity.
 func StoreImage(fileName string, image []byte) error {
@@ -112,16 +151,6 @@ func InitDB(dbPath string) (*sql.DB, error){
 	return database, nil
 }
 
-func (i *itemRepository) GetByID(ctx context.Context, itemID int) (*Item, error) {
-    var item Item
-    err := i.db.QueryRowContext(ctx, "SELECT id, name, category, image FROM items WHERE id = ?", itemID).
-        Scan(&item.ID, &item.Name, &item.Category, &item.Image)
 
-    if err != nil {
-        if errors.Is(err, sql.ErrNoRows) {
-            return nil, fmt.Errorf("item not found")
-        }
-        return nil, fmt.Errorf("failed to query item: %w", err)
-    }
-    return &item, nil
-}
+
+

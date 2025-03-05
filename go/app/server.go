@@ -54,6 +54,7 @@ func (s Server) Run() int {
 	mux.HandleFunc("GET /items", h.GetItems)//add in 4-3
 	mux.HandleFunc("GET /images/{filename}", h.GetImage)
 	mux.HandleFunc("GET /items/{item_id}", h.GetItem)
+	mux.HandleFunc("GET /search", h.Search)
 
 	// start the server
 	slog.Info("http server started on", "port", s.Port)
@@ -332,6 +333,28 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+}
+
+func (s *Handlers) Search(w http.ResponseWriter, r *http.Request){
+	ctx := r.Context()
+
+	keyword := r.URL.Query().Get("keyword")
+	if keyword == ""{
+		http.Error(w, "keyword is required", http.StatusBadRequest)
+		return 
+	}
+
+	items, err := s.itemRepo.SearchByKeyword(ctx, keyword)
+	if err != nil{
+		http.Error(w, "failed to search items", http.StatusInternalServerError)
+		return
+	}
+
+	resp := struct{
+		Items []Item `json:"items"`
+	}{Items: items}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 
