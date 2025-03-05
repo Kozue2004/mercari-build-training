@@ -1,17 +1,17 @@
 package app
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"io"
-	"crypto/sha256"
 	"strconv"
+	"strings"
 )
 
 type Server struct {
@@ -46,7 +46,7 @@ func (s Server) Run() int {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", h.Hello)
 	mux.HandleFunc("POST /items", h.AddItem)
-	mux.HandleFunc("GET /items", h.GetItems)//add in 4-3
+	mux.HandleFunc("GET /items", h.GetItems) //add in 4-3
 	mux.HandleFunc("GET /images/{filename}", h.GetImage)
 	mux.HandleFunc("GET /items/{item_id}", h.GetItem)
 
@@ -82,9 +82,9 @@ func (s *Handlers) Hello(w http.ResponseWriter, r *http.Request) {
 }
 
 type AddItemRequest struct {
-	Name string `json:"name"`
-	Category string `json:"category"`// STEP 4-2: add a category field
-	Image []byte `json:"image_name"` // STEP 4-4: add an image field
+	Name     string `json:"name"`
+	Category string `json:"category"`   // STEP 4-2: add a category field
+	Image    []byte `json:"image_name"` // STEP 4-4: add an image field
 }
 
 type AddItemResponse struct {
@@ -94,37 +94,37 @@ type AddItemResponse struct {
 // parseAddItemRequest parses and validates the request to add an item.
 func parseAddItemRequest(r *http.Request) (*AddItemRequest, []byte, error) {
 	req := &AddItemRequest{
-		Name: r.FormValue("name"),
-		Category: r.FormValue("category"),// STEP 4-2: add a category field
+		Name:     r.FormValue("name"),
+		Category: r.FormValue("category"), // STEP 4-2: add a category field
 	}
 
 	// STEP 4-4: add an image field
 	err := r.ParseMultipartForm(10 << 20)
-        if err != nil {
-        fmt.Println("Failed to parse form data:", err)
-        return nil, nil, fmt.Errorf("failed to parse form data: %w", err)
-        }
+	if err != nil {
+		fmt.Println("Failed to parse form data:", err)
+		return nil, nil, fmt.Errorf("failed to parse form data: %w", err)
+	}
 
-        file, _, err := r.FormFile("image")
-        if err != nil {
-                return nil, nil, errors.New("image file is required")
-    }
-        defer file.Close()
-	 
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		return nil, nil, errors.New("image file is required")
+	}
+	defer file.Close()
+
 	// validate the request
 	if req.Name == "" {
 		return nil, nil, errors.New("name is required")
 	}
 
 	// STEP 4-2: validate the category field
-	if req.Category == ""{
+	if req.Category == "" {
 		return nil, nil, errors.New("category is required")
 	}
 
 	// STEP 4-4: validate the image field
-	imageData, err:= io.ReadAll(file)
+	imageData, err := io.ReadAll(file)
 	if err != nil {
-		return nil, nil, errors.New("imagename is required")
+		return nil, nil, errors.New("image is required")
 	}
 
 	return req, imageData, nil
@@ -144,14 +144,14 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 	filePath, err := s.storeImage(imageData)
 	if err != nil {
 		slog.Error("failed to store image: ", "error", err)
-	 	http.Error(w, err.Error(), http.StatusInternalServerError)
-	 	return
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	item := &Item{
-		Name: req.Name,
-		Category: req.Category,// STEP 4-2: add a category field
-		Image : filePath,// STEP 4-4: add an image field
+		Name:     req.Name,
+		Category: req.Category, // STEP 4-2: add a category field
+		Image:    filePath,     // STEP 4-4: add an image field
 	}
 	message := fmt.Sprintf("item received: %s", item.Name)
 	slog.Info(message)
@@ -174,23 +174,26 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 
 // GetItems is a handler to return resistered items
 func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
+	ctx := r.Context()
 
-    // データ取得
-    items, err := s.itemRepo.GetAll(ctx)
-    if err != nil {
-        http.Error(w, "failed to retrieve items", http.StatusInternalServerError)
-        return
-    }
+	// データ取得
+	items, err := s.itemRepo.GetAll(ctx)
+	if err != nil {
+		http.Error(w, "failed to retrieve items", http.StatusInternalServerError)
+		return
+	}
 
-    // JSONレスポンスを返す
-    resp := struct {
-        Items []Item `json:"items"`
-    }{Items: items}
+	// JSONレスポンスを返す
+	resp := struct {
+		Items []Item `json:"items"`
+	}{Items: items}
 
-    json.NewEncoder(w).Encode(resp)
+	err = json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
-
 
 // storeImage stores an image and returns the file path and an error if any.
 // this method calculates the hash sum of the image as a file name to avoid the duplication of a same file
@@ -201,20 +204,20 @@ func (s *Handlers) storeImage(image []byte) (filePath string, err error) {
 	// TODO:
 	// - calc hash sum
 	hash := sha256.Sum256(image)
-	fileName := fmt.Sprintf("%x.jpg",hash)
+	fileName := fmt.Sprintf("%x.jpg", hash)
 
 	// - build image file path
 	filePath = filepath.Join(s.imgDirPath, fileName)
 
 	// - check if the image already exists
-	if _, err = os.Stat(filePath); err == nil{
+	if _, err = os.Stat(filePath); err == nil {
 		return fileName, nil
 	}
 
 	// - store image
-	fmt.Println("Savin new image:",fileName)
+	slog.Info("Saving new image:", "fileName", fileName)
 	err = os.WriteFile(filePath, image, 0644)
-	if err != nil{
+	if err != nil {
 		return "", fmt.Errorf("failed to save image: %w", err)
 	}
 
@@ -292,7 +295,7 @@ func (s *Handlers) buildImagePath(imageFileName string) (string, error) {
 	return imgPath, nil
 }
 
-//// parseGetItemRequest parses and validates the request to get an item information.
+// // parseGetItemRequest parses and validates the request to get an item information.
 func parseGetItemRequest(r *http.Request) (int, error) {
 	itemIDStr := r.PathValue("item_id")
 	itemID, err := strconv.Atoi(itemIDStr)
@@ -323,7 +326,7 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item := items[itemID-1] 
+	item := items[itemID-1]
 
 	resp, err := json.Marshal(item)
 	if err != nil {
@@ -335,5 +338,3 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }
-
-
