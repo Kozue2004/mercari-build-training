@@ -37,9 +37,14 @@ func (s Server) Run() int {
 	}
 
 	// STEP 5-1: set up the database connection
+	db, err := InitDB("db/mercari.sqlite3")
+	if err != nil {
+		slog.Error("failed to initialize database", "error", err)
+		return 1
+	}
 
 	// set up handlers
-	itemRepo := NewItemRepository()
+	itemRepo := NewItemRepository(db)
 	h := &Handlers{imgDirPath: s.ImageDirPath, itemRepo: itemRepo}
 
 	// set up routes
@@ -52,7 +57,7 @@ func (s Server) Run() int {
 
 	// start the server
 	slog.Info("http server started on", "port", s.Port)
-	err := http.ListenAndServe(":"+s.Port, simpleCORSMiddleware(simpleLoggerMiddleware(mux), frontURL, []string{"GET", "HEAD", "POST", "OPTIONS"}))
+	err = http.ListenAndServe(":"+s.Port, simpleCORSMiddleware(simpleLoggerMiddleware(mux), frontURL, []string{"GET", "HEAD", "POST", "OPTIONS"}))
 	if err != nil {
 		slog.Error("failed to start server: ", "error", err)
 		return 1
@@ -176,14 +181,14 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
     ctx := r.Context()
 
-    // データ取得
+    // get the data
     items, err := s.itemRepo.GetAll(ctx)
     if err != nil {
-        http.Error(w, "failed to retrieve items", http.StatusInternalServerError)
+        http.Error(w, "filed to retrieve items", http.StatusInternalServerError)
         return
     }
 
-    // JSONレスポンスを返す
+    // return JSON response
     resp := struct {
         Items []Item `json:"items"`
     }{Items: items}
@@ -312,18 +317,11 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := s.itemRepo.GetAll(ctx)
+	item, err := s.itemRepo.GetByID(ctx,itemID)
 	if err != nil {
-		http.Error(w, "failed to retrieve items", http.StatusInternalServerError)
-		return
-	}
-
-	if itemID > len(items) {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
-
-	item := items[itemID-1] 
 
 	resp, err := json.Marshal(item)
 	if err != nil {
