@@ -2,10 +2,10 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
-	"database/sql"
 	// STEP 5-1: uncomment this line
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -14,16 +14,16 @@ var errImageNotFound = errors.New("image not found")
 var db *sql.DB
 
 type Item struct {
-	ID       int    `db:"id" json:"-"`
-	Name     string `db:"name" json:"name"`
-	CategoryID int `db:"category_id" json:"category_id"`
-	Image    string `db:"image_name" json:"image_name"`
+	ID         int    `db:"id" json:"-"`
+	Name       string `db:"name" json:"name"`
+	CategoryID int    `db:"category_id" json:"category_id"`
+	Image      string `db:"image_name" json:"image_name"`
 }
 
-type ItemName struct{
+type ItemName struct {
 	ID       int    `db:"id" json:"-"`
 	Name     string `db:"name" json:"name"`
-	Category string `db:"category" json:"category"` 
+	Category string `db:"category" json:"category"`
 	Image    string `db:"image_name" json:"image_name"`
 }
 
@@ -54,8 +54,8 @@ func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
 
 	// STEP 5-1: add an implementation to store an item
 	_, err := i.db.ExecContext(ctx, "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)", item.Name, item.CategoryID, item.Image)
-	if err != nil{
-		return fmt.Errorf("failed to insert item :%w",err)
+	if err != nil {
+		return fmt.Errorf("failed to insert item :%w", err)
 	}
 	return nil
 }
@@ -65,24 +65,24 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 		SELECT items.id, items.name, categories.categoryname AS category, items.image_name FROM items
 		JOIN categories ON items.category_id = categories.id
 	`)
-	if err != nil{
+	if err != nil {
 		return nil, fmt.Errorf("failed to get items: %w", err)
 	}
 	defer rows.Close()
 
 	var items []Item
-	for rows.Next(){
+	for rows.Next() {
 		var item Item
 		if err := rows.Scan(ctx, `SELECT items.id, items.name, categories.name 
 			FROM items 
 			JOIN categories ON items.category_id = categories.id;
-			`); err != nil{
+			`); err != nil {
 			return nil, fmt.Errorf("failed to scan item: %w", err)
 		}
 		items = append(items, item)
 	}
 
-	if err := rows.Err(); err != nil{
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows nteraction error: %w", err)
 	}
 
@@ -90,33 +90,33 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 }
 
 func (i *itemRepository) GetByID(ctx context.Context, itemID int) (*Item, error) {
-    var item Item
-    err := i.db.QueryRowContext(ctx, "SELECT id, name, category, image FROM items WHERE id = ?", itemID).
-        Scan(`SELECT items.id, items.name, categories.name 
+	var item Item
+	err := i.db.QueryRowContext(ctx, "SELECT id, name, category, image FROM items WHERE id = ?", itemID).
+		Scan(`SELECT items.id, items.name, categories.name 
 			FROM items 
 			JOIN categories ON items.category_id = categories.id;	
 		`)
 
-    if err != nil {
-        if errors.Is(err, sql.ErrNoRows) {
-            return nil, fmt.Errorf("item not found")
-        }
-        return nil, fmt.Errorf("failed to query item: %w", err)
-    }
-    return &item, nil
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("item not found")
+		}
+		return nil, fmt.Errorf("failed to query item: %w", err)
+	}
+	return &item, nil
 }
 
-//get the category_id based on category
+// get the category_id based on category
 func (i *itemRepository) GetCategoryID(ctx context.Context, categoryName string, categoryID *int) error {
 	err := i.db.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", categoryName).Scan(categoryID)
-	if err != nil{
-		if errors.Is(err, sql.ErrNoRows){
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			res, err := i.db.ExecContext(ctx, "INSERT INTO categories (name) VALUES (?)", categoryName)
-			if err != nil{
+			if err != nil {
 				return fmt.Errorf("failed to insert category: %w", err)
 			}
 			id, err := res.LastInsertId()
-			if err != nil{
+			if err != nil {
 				return fmt.Errorf("failed to get category id: %w", err)
 			}
 			*categoryID = int(id)
@@ -127,7 +127,7 @@ func (i *itemRepository) GetCategoryID(ctx context.Context, categoryName string,
 	return nil
 }
 
-func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) (*sql.Rows, error){
+func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) (*sql.Rows, error) {
 	rows, err := i.db.QueryContext(ctx, `
 	SELECT items.id, items.name, categories.name, items.image_name
 	FROM items
@@ -136,7 +136,6 @@ func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) (*
 
 	return rows, err
 }
-
 
 // StoreImage stores an image and returns an error if any.
 // This package doesn't have a related interface for simplicity.
@@ -156,19 +155,19 @@ func StoreImage(fileName string, image []byte) error {
 	return nil
 }
 
-func InitDB(dbPath string) (*sql.DB, error){
-	database, err := sql.Open("sqlite3",dbPath)
-	if err != nil{
+func InitDB(dbPath string) (*sql.DB, error) {
+	database, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	createCategoriesTableQuery :=`
+	createCategoriesTableQuery := `
 	CREATE TABLE IF NOT EXISTS categories(
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT UNIQUE NOT NULL
 	);`
 	_, err = database.Exec(createCategoriesTableQuery)
-	if err != nil{
+	if err != nil {
 		return nil, fmt.Errorf("failed to create categories table: %w", err)
 	}
 
@@ -181,7 +180,7 @@ func InitDB(dbPath string) (*sql.DB, error){
 		FOREIGN KEY (category_id) REFERENCES categories(id)
 	);`
 	_, err = database.Exec(createItemsTableQuery)
-	if err != nil{
+	if err != nil {
 		return nil, fmt.Errorf("failed to create item table: %w", err)
 	}
 
