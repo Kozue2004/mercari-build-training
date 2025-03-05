@@ -2,10 +2,9 @@ package app
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
-	//"io/ioutil"
 	"os"
 	// STEP 5-1: uncomment this line
 	// _ "github.com/mattn/go-sqlite3"
@@ -14,10 +13,10 @@ import (
 var errImageNotFound = errors.New("image not found")
 
 type Item struct {
-	ID   int    `db:"id" json:"-"`
-	Name string `db:"name" json:"name"`
+	ID       int    `db:"id" json:"-"`
+	Name     string `db:"name" json:"name"`
 	Category string `db:"category" json:"category"`
-	Image string `db:"image_name" json:"image_name"`
+	Image    string `db:"image_name" json:"image_name"`
 }
 
 // Please run `go generate ./...` to generate the mock implementation
@@ -45,35 +44,35 @@ func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
 	// STEP 4-1: add an implementation to store an item
 	file, err := os.ReadFile(i.fileName)
 	if err != nil {
-		if os.IsNotExist(err){
+		if os.IsNotExist(err) {
 			file = []byte(`{"items": []}`)
 		} else {
-			return fmt.Errorf("failed to read file: %w",err)
+			return fmt.Errorf("failed to read file: %w", err)
 		}
 	}
 
-	if len(file) ==0 {
+	if len(file) == 0 {
 		file = []byte(`{"items": []}`)
 	}
 
 	var data struct {
 		Items []Item `json:"items"`
 	}
-	err = json.Unmarshal(file,&data)
-	if err != nil{
-		return fmt.Errorf("faild to parse JSON:%w",err)
+	err = json.Unmarshal(file, &data)
+	if err != nil {
+		return fmt.Errorf("faild to parse JSON:%w", err)
 	}
 
-	data.Items = append (data.Items,*item)
+	data.Items = append(data.Items, *item)
 
-	updatedData,err := json.MarshalIndent(data,""," ")
-	if err != nil{
-		return fmt.Errorf("failed to encode JSON:%w",err)
+	updatedData, err := json.MarshalIndent(data, "", " ")
+	if err != nil {
+		return fmt.Errorf("failed to encode JSON:%w", err)
 	}
 
 	err = os.WriteFile(i.fileName, updatedData, 0644)
-	if err != nil{
-		return fmt.Errorf("failed to save file: %w",err)
+	if err != nil {
+		return fmt.Errorf("failed to save file: %w", err)
 	}
 
 	return nil
@@ -99,7 +98,6 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 	return data.Items, nil
 }
 
-
 // StoreImage stores an image and returns an error if any.
 // This package doesn't have a related interface for simplicity.
 func StoreImage(fileName string, image []byte) error {
@@ -111,7 +109,7 @@ func StoreImage(fileName string, image []byte) error {
 	defer file.Close()
 
 	_, err = file.Write(image)
-	if err!= nil{
+	if err != nil {
 		return fmt.Errorf("failed to write image data: %w", err)
 	}
 
