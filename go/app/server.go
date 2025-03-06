@@ -37,9 +37,14 @@ func (s Server) Run() int {
 	}
 
 	// STEP 5-1: set up the database connection
+	db, err := InitDB("db/mercari.sqlite3")
+	if err != nil {
+		slog.Error("failed to initialize database", "error", err)
+		return 1
+	}
 
 	// set up handlers
-	itemRepo := NewItemRepository()
+	itemRepo := NewItemRepository(db)
 	h := &Handlers{imgDirPath: s.ImageDirPath, itemRepo: itemRepo}
 
 	// set up routes
@@ -49,10 +54,11 @@ func (s Server) Run() int {
 	mux.HandleFunc("GET /items", h.GetItems) //add in 4-3
 	mux.HandleFunc("GET /images/{filename}", h.GetImage)
 	mux.HandleFunc("GET /items/{item_id}", h.GetItem)
+	mux.HandleFunc("GET /search", h.Search) //add in STEP5
 
 	// start the server
 	slog.Info("http server started on", "port", s.Port)
-	err := http.ListenAndServe(":"+s.Port, simpleCORSMiddleware(simpleLoggerMiddleware(mux), frontURL, []string{"GET", "HEAD", "POST", "OPTIONS"}))
+	err = http.ListenAndServe(":"+s.Port, simpleCORSMiddleware(simpleLoggerMiddleware(mux), frontURL, []string{"GET", "HEAD", "POST", "OPTIONS"}))
 	if err != nil {
 		slog.Error("failed to start server: ", "error", err)
 		return 1
@@ -148,10 +154,19 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//get category_id
+	var categoryID int
+	err = s.itemRepo.GetCategoryID(ctx, req.Category, &categoryID)
+	if err != nil {
+		http.Error(w, "failed to get category ID", http.StatusInternalServerError)
+		return
+	}
+
 	item := &Item{
-		Name:     req.Name,
-		Category: req.Category, // STEP 4-2: add a category field
-		Image:    filePath,     // STEP 4-4: add an image field
+		Name:       req.Name,
+		CategoryID: categoryID, // STEP 4-2: add a category field
+		Image:      filePath,   // STEP 4-4: add an image field
+
 	}
 	message := fmt.Sprintf("item received: %s", item.Name)
 	slog.Info(message)
@@ -176,17 +191,19 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// データ取得
+	// get the data
 	items, err := s.itemRepo.GetAll(ctx)
 	if err != nil {
-		http.Error(w, "failed to retrieve items", http.StatusInternalServerError)
+		http.Error(w, "filed to retrieve items", http.StatusInternalServerError)
 		return
 	}
 
-	// JSONレスポンスを返す
+	// return JSON response
+
 	resp := struct {
 		Items []Item `json:"items"`
 	}{Items: items}
+
 
 	err = json.NewEncoder(w).Encode(resp)
 	if err != nil {
@@ -215,7 +232,7 @@ func (s *Handlers) storeImage(image []byte) (filePath string, err error) {
 	}
 
 	// - store image
-	slog.Info("Saving new image:", "fileName", fileName)
+	fmt.Println("Savin new image:", fileName)
 	err = os.WriteFile(filePath, image, 0644)
 	if err != nil {
 		return "", fmt.Errorf("failed to save image: %w", err)
@@ -305,7 +322,7 @@ func parseGetItemRequest(r *http.Request) (int, error) {
 	return itemID, nil
 }
 
-// GetItem is a handler to return an item information for GET /images/{item_id} .
+// GetItem is a handler to return an item information for GET /images/{item_id}.(for STEP 4-5)
 func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -315,18 +332,11 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := s.itemRepo.GetAll(ctx)
+	item, err := s.itemRepo.GetByID(ctx, itemID)
 	if err != nil {
-		http.Error(w, "failed to retrieve items", http.StatusInternalServerError)
-		return
-	}
-
-	if itemID > len(items) {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
-
-	item := items[itemID-1]
 
 	resp, err := json.Marshal(item)
 	if err != nil {
@@ -338,3 +348,50 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }
+
+func (s *Handlers) Search(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	keyword := r.URL.Query().Get("keyword")
+	if keyword == "" {
+		http.Error(w, "keyword is required", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := s.itemRepo.SearchByKeyword(ctx, keyword)
+	if err != nil {
+		http.Error(w, "failed to search items", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type itemResponse struct {
+		ID       int    `json:"-"`
+		Name     string `json:"name"`
+		Category string `json:"category"`
+		Image    string `json:"image_name"`
+	}
+
+	var responseItems []itemResponse
+	for rows.Next() {
+		var item itemResponse
+		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.Image); err != nil {
+			http.Error(w, "failed to scan item", http.StatusInternalServerError)
+			return
+		}
+		responseItems = append(responseItems, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, "error iterating through items", http.StatusInternalServerError)
+		return
+	}
+
+	resp := struct {
+		Items []itemResponse `json:"items"`
+	}{Items: responseItems}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
