@@ -225,7 +225,7 @@ func (s *Handlers) storeImage(image []byte) (filePath string, err error) {
 	}
 
 	// - store image
-	fmt.Println("Savin new image:", fileName)
+	slog.Info("Saving new image", "filename", fileName)
 	err = os.WriteFile(filePath, image, 0644)
 	if err != nil {
 		return "", fmt.Errorf("failed to save image: %w", err)

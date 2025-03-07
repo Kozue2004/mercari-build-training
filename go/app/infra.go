@@ -11,7 +11,6 @@ import (
 )
 
 var errImageNotFound = errors.New("image not found")
-var db *sql.DB
 
 type Item struct {
 	ID         int    `db:"id" json:"-"`
