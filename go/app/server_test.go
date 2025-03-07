@@ -1,15 +1,16 @@
 package app
 
 import (
-	"bytes"
-	"mime/multipart"
+	"bytes"          //add in STEP6-1
+	"mime/multipart" //add in STEP6-1
 	"net/http"
 	"net/http/httptest"
 	//"net/url"
 	//"strings"
-	"io"
-	"os"
-	"path/filepath"
+	"encoding/json" //add in STEP6-2
+	"io"            //add in STEP6-1
+	"os"            //add in STEP6-1
+	"path/filepath" //add in STEP6-1
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -112,14 +113,14 @@ func TestHelloHandler(t *testing.T) {
 
 	// Please comment out for STEP 6-2
 	// predefine what we want
-	// type wants struct {
-	// 	code int               // desired HTTP status code
-	// 	body map[string]string // desired body
-	// }
-	// want := wants{
-	// 	code: http.StatusOK,
-	// 	body: map[string]string{"message": "Hello, world!"},
-	// }
+	type wants struct {
+		code int               // desired HTTP status code
+		body map[string]string // desired body
+	}
+	want := wants{
+		code: http.StatusOK,
+		body: map[string]string{"message": "Hello, world!"},
+	}
 
 	// set up test
 	req := httptest.NewRequest("GET", "/hello", nil)
@@ -129,8 +130,19 @@ func TestHelloHandler(t *testing.T) {
 	h.Hello(res, req)
 
 	// STEP 6-2: confirm the status code
+	if res.Code != want.code {
+		t.Errorf("expected status code %d, got %d", want.code, res.Code)
+	}
 
 	// STEP 6-2: confirm response body
+	gotBody := make(map[string]string)
+	if err := json.Unmarshal(res.Body.Bytes(), &gotBody); err != nil {
+		t.Fatalf("failed to unmarshal response body: %v", err)
+	}
+
+	if diff := cmp.Diff(want.body, gotBody); diff != "" {
+		t.Errorf("unexpected body (-want +got):\n%s", diff)
+	}
 }
 
 /*func TestAddItem(t *testing.T) {
