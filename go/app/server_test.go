@@ -2,19 +2,20 @@ package app
 
 import (
 	"bytes"          //add in STEP6-1
+	"database/sql"   //add in STEP6-4
+	"encoding/json"  //add in STEP6-2
+	"fmt"            //add in STEP6-3
+	"io"             //add in STEP6-1
 	"mime/multipart" //add in STEP6-1
 	"net/http"
 	"net/http/httptest"
-	//"net/url"
-	"encoding/json" //add in STEP6-2
-	"fmt"           //add in STEP6-3
-	"io"            //add in STEP6-1
 	"os"            //add in STEP6-1
 	"path/filepath" //add in STEP6-1
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	_ "github.com/mattn/go-sqlite3" //add in STEP6-4
 	"go.uber.org/mock/gomock"
 )
 
@@ -246,120 +247,149 @@ func TestAddItem(t *testing.T) {
 }
 
 // STEP 6-4: uncomment this test
-// func TestAddItemE2e(t *testing.T) {
-// 	if testing.Short() {
-// 		t.Skip("skipping e2e test")
-// 	}
+func TestAddItemE2e(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test")
+	}
 
-// 	db, closers, err := setupDB(t)
-// 	if err != nil {
-// 		t.Fatalf("failed to set up database: %v", err)
-// 	}
-// 	t.Cleanup(func() {
-// 		for _, c := range closers {
-// 			c()
-// 		}
-// 	})
+	db, closers, err := setupDB(t)
+	if err != nil {
+		t.Fatalf("failed to set up database: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, c := range closers {
+			c()
+		}
+	})
 
-// 	type wants struct {
-// 		code int
-// 	}
-// 	cases := map[string]struct {
-// 		args map[string]string
-// 		wants
-// 	}{
-// 		"ok: correctly inserted": {
-// 			args: map[string]string{
-// 				"name":     "used iPhone 16e",
-// 				"category": "phone",
-// 			},
-// 			wants: wants{
-// 				code: http.StatusOK,
-// 			},
-// 		},
-// 		"ng: failed to insert": {
-// 			args: map[string]string{
-// 				"name":     "",
-// 				"category": "phone",
-// 			},
-// 			wants: wants{
-// 				code: http.StatusBadRequest,
-// 			},
-// 		},
-// 	}
+	type wants struct {
+		code int
+	}
+	cases := map[string]struct {
+		args map[string]string
+		wants
+	}{
+		"ok: correctly inserted": {
+			args: map[string]string{
+				"name":     "used iPhone 16e",
+				"category": "phone",
+			},
+			wants: wants{
+				code: http.StatusOK,
+			},
+		},
+		"ng: failed to insert": {
+			args: map[string]string{
+				"name":     "",
+				"category": "phone",
+			},
+			wants: wants{
+				code: http.StatusBadRequest,
+			},
+		},
+	}
 
-// 	for name, tt := range cases {
-// 		t.Run(name, func(t *testing.T) {
-// 			h := &Handlers{itemRepo: &itemRepository{db: db}}
+	for name, tt := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := &Handlers{itemRepo: &itemRepository{db: db}}
 
-// 			values := url.Values{}
-// 			for k, v := range tt.args {
-// 				values.Set(k, v)
-// 			}
-// 			req := httptest.NewRequest("POST", "/items", strings.NewReader(values.Encode()))
-// 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			for k, v := range tt.args {
+				_ = writer.WriteField(k, v)
+			}
+			fileWriter, _ := writer.CreateFormFile("image", "dummy.png")
+			fileWriter.Write([]byte("duummy image content"))
+			writer.Close()
 
-// 			rr := httptest.NewRecorder()
-// 			h.AddItem(rr, req)
+			req := httptest.NewRequest("POST", "/items", &body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
 
-// 			// check response
-// 			if tt.wants.code != rr.Code {
-// 				t.Errorf("expected status code %d, got %d", tt.wants.code, rr.Code)
-// 			}
-// 			if tt.wants.code >= 400 {
-// 				return
-// 			}
-// 			for _, v := range tt.args {
-// 				if !strings.Contains(rr.Body.String(), v) {
-// 					t.Errorf("response body does not contain %s, got: %s", v, rr.Body.String())
-// 				}
-// 			}
+			rr := httptest.NewRecorder()
+			h.AddItem(rr, req)
 
-// 			// STEP 6-4: check inserted data
-// 		})
-// 	}
-// }
+			// check response
+			if tt.wants.code != rr.Code {
+				t.Errorf("expected status code %d, got %d", tt.wants.code, rr.Code)
+			}
+			if tt.wants.code >= 400 {
+				return
+			}
+			for _, v := range tt.args {
+				if !strings.Contains(rr.Body.String(), v) {
+					t.Errorf("response body does not contain %s, got: %s", v, rr.Body.String())
+				}
+			}
 
-// func setupDB(t *testing.T) (db *sql.DB, closers []func(), e error) {
-// 	t.Helper()
+			// STEP 6-4: check inserted data
+			var id int
+			var name, category string
+			err := db.QueryRow(`
+				SELECT items.id, items.name, categories.name
+				FROM items
+				JOIN categories ON items.category_id = categories.id
+				WHERE items.name = ?`, tt.args["name"]).Scan(&id, &name, &category)
 
-// 	defer func() {
-// 		if e != nil {
-// 			for _, c := range closers {
-// 				c()
-// 			}
-// 		}
-// 	}()
+			if err != nil {
+				t.Fatalf("failed to retrieve inserted item: %v", err)
+			}
 
-// 	// create a temporary file for e2e testing
-// 	f, err := os.CreateTemp(".", "*.sqlite3")
-// 	if err != nil {
-// 		return nil, nil, err
-// 	}
-// 	closers = append(closers, func() {
-// 		f.Close()
-// 		os.Remove(f.Name())
-// 	})
+			if name != tt.args["name"] || category != tt.args["category"] {
+				t.Errorf("expected (name, category) = (%s, %s), but got (%s, %s)", tt.args["name"], tt.args["category"], name, category)
+			}
+		})
+	}
+}
 
-// 	// set up tables
-// 	db, err = sql.Open("sqlite3", f.Name())
-// 	if err != nil {
-// 		return nil, nil, err
-// 	}
-// 	closers = append(closers, func() {
-// 		db.Close()
-// 	})
+func setupDB(t *testing.T) (db *sql.DB, closers []func(), e error) {
+	t.Helper()
 
-// 	// TODO: replace it with real SQL statements.
-// 	cmd := `CREATE TABLE IF NOT EXISTS items (
-// 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-// 		name VARCHAR(255),
-// 		category VARCHAR(255)
-// 	)`
-// 	_, err = db.Exec(cmd)
-// 	if err != nil {
-// 		return nil, nil, err
-// 	}
+	defer func() {
+		if e != nil {
+			for _, c := range closers {
+				c()
+			}
+		}
+	}()
 
-// 	return db, closers, nil
-// }
+	// create a temporary file for e2e testing
+	f, err := os.CreateTemp(".", "*.sqlite3")
+	if err != nil {
+		return nil, nil, err
+	}
+	closers = append(closers, func() {
+		f.Close()
+		os.Remove(f.Name())
+	})
+
+	// set up tables
+	db, err = sql.Open("sqlite3", f.Name())
+	if err != nil {
+		return nil, nil, err
+	}
+	closers = append(closers, func() {
+		db.Close()
+	})
+
+	// TODO: replace it with real SQL statements.
+	cmd := `
+	CREATE TABLE IF NOT EXISTS categories(
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(255) NOT NULL UNIQUE
+	);
+	
+	CREATE TABLE IF NOT EXISTS items(
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(255) NOT NULL,
+		category_id INTEGER NOT NULL,
+		image_name VARCHAR(255) NOT NULL,
+		FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+	);`
+
+	_, err = db.Exec(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return db, closers, nil
+}
