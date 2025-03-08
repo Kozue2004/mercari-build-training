@@ -129,7 +129,7 @@ func parseAddItemRequest(r *http.Request) (*AddItemRequest, []byte, string, erro
 
 	// STEP 4-4: validate the image field
 	imageData, err := io.ReadAll(file)
-	if err != nil {
+	if err != nil 
 		return nil, nil, "", errors.New("imagename is required")
 	}
 
@@ -165,6 +165,7 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		Name:       req.Name,
 		CategoryID: categoryID, // STEP 4-2: add a category field
 		Image:      filePath,   // STEP 4-4: add an image field
+
 	}
 	message := fmt.Sprintf("item received: %s,%s, %s", item.Name, req.Category, filename)
 	slog.Info(message)
@@ -197,11 +198,17 @@ func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// return JSON response
+
 	resp := struct {
 		Items []Item `json:"items"`
 	}{Items: items}
 
-	json.NewEncoder(w).Encode(resp)
+
+	err = json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 // storeImage stores an image and returns the file path and an error if any.
@@ -386,3 +393,4 @@ func (s *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
+
