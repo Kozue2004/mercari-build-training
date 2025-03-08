@@ -6,15 +6,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	//"net/url"
-	//"strings"
 	"encoding/json" //add in STEP6-2
+	"fmt"           //add in STEP6-3
 	"io"            //add in STEP6-1
 	"os"            //add in STEP6-1
 	"path/filepath" //add in STEP6-1
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	//"go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 func TestParseAddItemRequest(t *testing.T) {
@@ -92,7 +93,7 @@ func TestParseAddItemRequest(t *testing.T) {
 			req.Header.Set("Content-Type", writer.FormDataContentType())
 
 			// execute test target
-			got, _, err := parseAddItemRequest(req)
+			got, _, _, err := parseAddItemRequest(req)
 
 			// confirm the result
 			if err != nil {
@@ -145,7 +146,7 @@ func TestHelloHandler(t *testing.T) {
 	}
 }
 
-/*func TestAddItem(t *testing.T) {
+func TestAddItem(t *testing.T) {
 	t.Parallel()
 
 	type wants struct {
@@ -160,10 +161,13 @@ func TestHelloHandler(t *testing.T) {
 			args: map[string]string{
 				"name":     "used iPhone 16e",
 				"category": "phone",
+				"image":    "dummy.png",
 			},
 			injector: func(m *MockItemRepository) {
 				// STEP 6-3: define mock expectation
 				// succeeded to insert
+				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(1, nil)
+				m.EXPECT().Insert(gomock.Any(), gomock.Any()).Return(nil)
 			},
 			wants: wants{
 				code: http.StatusOK,
@@ -173,10 +177,12 @@ func TestHelloHandler(t *testing.T) {
 			args: map[string]string{
 				"name":     "used iPhone 16e",
 				"category": "phone",
+				"image":    "dummy.png",
 			},
 			injector: func(m *MockItemRepository) {
 				// STEP 6-3: define mock expectation
 				// failed to insert
+				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(0, fmt.Errorf("category not found"))
 			},
 			wants: wants{
 				code: http.StatusInternalServerError,
@@ -194,12 +200,31 @@ func TestHelloHandler(t *testing.T) {
 			tt.injector(mockIR)
 			h := &Handlers{itemRepo: mockIR}
 
-			values := url.Values{}
+			var b bytes.Buffer
+			w := multipart.NewWriter(&b)
 			for k, v := range tt.args {
-				values.Set(k, v)
+				if k != "image" {
+					_ = w.WriteField(k, v)
+				}
 			}
-			req := httptest.NewRequest("POST", "/items", strings.NewReader(values.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			//create the image for the test
+			fileWriter, err := w.CreateFormFile("image", "dummy.png")
+			if err != nil {
+				t.Fatalf("failed to create form file: %v", err)
+			}
+
+			//send the image for the test
+			dummyImage := []byte("dummy image data")
+			_, err = fileWriter.Write(dummyImage)
+			if err != nil {
+				t.Fatalf("failed to write dummy imagedata: %v", err)
+			}
+
+			w.Close()
+
+			req := httptest.NewRequest("POST", "/items", &b)
+			req.Header.Set("Content-Type", w.FormDataContentType())
 
 			rr := httptest.NewRecorder()
 			h.AddItem(rr, req)
@@ -218,7 +243,7 @@ func TestHelloHandler(t *testing.T) {
 			}
 		})
 	}
-}*/
+}
 
 // STEP 6-4: uncomment this test
 // func TestAddItemE2e(t *testing.T) {
