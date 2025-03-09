@@ -129,7 +129,7 @@ func parseAddItemRequest(r *http.Request) (*AddItemRequest, []byte, string, erro
 
 	// STEP 4-4: validate the image field
 	imageData, err := io.ReadAll(file)
-	if err != nil {
+	if err != nil{ 
 		return nil, nil, "", errors.New("imagename is required")
 	}
 
