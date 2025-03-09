@@ -38,7 +38,7 @@ func TestParseAddItemRequest(t *testing.T) {
 				"name":     "TestName",     // fill here
 				"category": "TestCategory", // fill here
 			},
-			filePath: "test.png", // imagefile
+			filePath: "testdata/test.png", // imagefile
 			wants: wants{
 				req: &AddItemRequest{
 					Name:     "TestName",     // fill here
@@ -133,7 +133,11 @@ func TestHelloHandler(t *testing.T) {
 
 	// STEP 6-2: confirm the status code
 	if res.Code != want.code {
-		t.Errorf("expected status code %d, got %d", want.code, res.Code)
+		t.Fatalf("expected status code %d, got %d", want.code, res.Code)
+	}
+
+	if res.Code >= 400 {
+		return
 	}
 
 	// STEP 6-2: confirm response body
@@ -167,8 +171,8 @@ func TestAddItem(t *testing.T) {
 			injector: func(m *MockItemRepository) {
 				// STEP 6-3: define mock expectation
 				// succeeded to insert
-				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(1, nil)
-				m.EXPECT().Insert(gomock.Any(), gomock.Any()).Return(nil)
+				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(1, nil).Times(1)
+				m.EXPECT().Insert(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 			},
 			wants: wants{
 				code: http.StatusOK,
@@ -183,7 +187,7 @@ func TestAddItem(t *testing.T) {
 			injector: func(m *MockItemRepository) {
 				// STEP 6-3: define mock expectation
 				// failed to insert
-				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(0, fmt.Errorf("category not found"))
+				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(0, fmt.Errorf("category not found")).Times(1)
 			},
 			wants: wants{
 				code: http.StatusInternalServerError,
@@ -210,7 +214,8 @@ func TestAddItem(t *testing.T) {
 			}
 
 			//create the image for the test
-			fileWriter, err := w.CreateFormFile("image", "dummy.png")
+			const testImageFileName = "dummy.png"
+			fileWriter, err := w.CreateFormFile("image", testImageFileName)
 			if err != nil {
 				t.Fatalf("failed to create form file: %v", err)
 			}
@@ -263,28 +268,58 @@ func TestAddItemE2e(t *testing.T) {
 	})
 
 	type wants struct {
-		code int
+		code     int
+		response struct {
+			Name     string
+			Category string
+		}
 	}
 	cases := map[string]struct {
-		args map[string]string
+		args     map[string]string
+		injector func(m *MockItemRepository)
 		wants
 	}{
 		"ok: correctly inserted": {
 			args: map[string]string{
-				"name":     "used iPhone 16e",
+				"name":     "used iphone 16e",
 				"category": "phone",
+				"image":    "dummy.png",
+			},
+			injector: func(m *MockItemRepository) {
+				gomock.InOrder(
+					m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(1, nil).Times(1),
+					m.EXPECT().Insert(gomock.Any(), gomock.Any()).Return(nil).Times(1),
+				)
 			},
 			wants: wants{
 				code: http.StatusOK,
+				response: struct {
+					Name     string
+					Category string
+				}{
+					Name:     "used iphone 16e",
+					Category: "phone",
+				},
 			},
 		},
 		"ng: failed to insert": {
 			args: map[string]string{
 				"name":     "",
 				"category": "phone",
+				"image":    "dummy.png",
+			},
+			injector: func(m *MockItemRepository) {
+				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(0, fmt.Errorf("category not found"))
 			},
 			wants: wants{
 				code: http.StatusBadRequest,
+				response: struct {
+					Name     string
+					Category string
+				}{
+					Name:     "",
+					Category: "",
+				},
 			},
 		},
 	}
@@ -298,7 +333,8 @@ func TestAddItemE2e(t *testing.T) {
 			for k, v := range tt.args {
 				_ = writer.WriteField(k, v)
 			}
-			fileWriter, _ := writer.CreateFormFile("image", "dummy.png")
+			const testImageFileName = "dummy.png"
+			fileWriter, _ := writer.CreateFormFile("image", testImageFileName)
 			fileWriter.Write([]byte("duummy image content"))
 			writer.Close()
 
@@ -324,18 +360,19 @@ func TestAddItemE2e(t *testing.T) {
 			// STEP 6-4: check inserted data
 			var id int
 			var name, category string
-			err := db.QueryRow(`
+			if err := db.QueryRow(`
 				SELECT items.id, items.name, categories.name
 				FROM items
 				JOIN categories ON items.category_id = categories.id
-				WHERE items.name = ?`, tt.args["name"]).Scan(&id, &name, &category)
-
-			if err != nil {
-				t.Fatalf("failed to retrieve inserted item: %v", err)
+				WHERE items.name = ?`, tt.args["name"]).Scan(&id, &name, &category); err != nil {
+				t.Fatalf("failed to retrieve inserted  item: %v", err)
 			}
 
-			if name != tt.args["name"] || category != tt.args["category"] {
-				t.Errorf("expected (name, category) = (%s, %s), but got (%s, %s)", tt.args["name"], tt.args["category"], name, category)
+			if diff := cmp.Diff(tt.wants.response, struct {
+				Name     string
+				Category string
+			}{name, category}); diff != "" {
+				t.Errorf("unexpectef response (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -372,21 +409,13 @@ func setupDB(t *testing.T) (db *sql.DB, closers []func(), e error) {
 	})
 
 	// TODO: replace it with real SQL statements.
-	cmd := `
-	CREATE TABLE IF NOT EXISTS categories(
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name VARCHAR(255) NOT NULL UNIQUE
-	);
-	
-	CREATE TABLE IF NOT EXISTS items(
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name VARCHAR(255) NOT NULL,
-		category_id INTEGER NOT NULL,
-		image_name VARCHAR(255) NOT NULL,
-		FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
-	);`
+	sqlFilePath := "../db/items.sql"
+	sqlContent, err := os.ReadFile(sqlFilePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read SQL file: %w", err)
+	}
 
-	_, err = db.Exec(cmd)
+	_, err = db.Exec(string(sqlContent))
 	if err != nil {
 		return nil, nil, err
 	}

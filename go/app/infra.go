@@ -55,6 +55,7 @@ func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
 	_, err := i.db.ExecContext(ctx, "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)", item.Name, item.CategoryID, item.Image)
 	if err != nil {
 		return fmt.Errorf("failed to insert item :%w", err)
+
 	}
 	return nil
 }
@@ -83,6 +84,7 @@ func (i *itemRepository) GetAll(ctx context.Context) ([]Item, error) {
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows nteraction error: %w", err)
+
 	}
 
 	return items, nil
