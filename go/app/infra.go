@@ -11,7 +11,6 @@ import (
 )
 
 var errImageNotFound = errors.New("image not found")
-var db *sql.DB
 
 type Item struct {
 	ID         int    `db:"id" json:"-"`
@@ -35,7 +34,7 @@ type ItemRepository interface {
 	Insert(ctx context.Context, item *Item) error
 	GetAll(ctx context.Context) ([]Item, error)
 	GetByID(ctx context.Context, itemID int) (*Item, error)
-	GetCategoryID(ctx context.Context, categoryName string, categoryID *int) error
+	GetCategoryID(ctx context.Context, categoryName string) (int, error)
 	SearchByKeyword(ctx context.Context, keyword string) (*sql.Rows, error)
 }
 
@@ -51,7 +50,6 @@ func NewItemRepository(database *sql.DB) ItemRepository {
 
 // Insert inserts an item into the repository.
 func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
-
 
 	// STEP 5-1: add an implementation to store an item
 	_, err := i.db.ExecContext(ctx, "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)", item.Name, item.CategoryID, item.Image)
@@ -110,24 +108,25 @@ func (i *itemRepository) GetByID(ctx context.Context, itemID int) (*Item, error)
 }
 
 // get the category_id based on category
-func (i *itemRepository) GetCategoryID(ctx context.Context, categoryName string, categoryID *int) error {
-	err := i.db.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", categoryName).Scan(categoryID)
+func (i *itemRepository) GetCategoryID(ctx context.Context, categoryName string) (int, error) {
+	var categoryID int
+	err := i.db.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", categoryName).Scan(&categoryID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			res, err := i.db.ExecContext(ctx, "INSERT INTO categories (name) VALUES (?)", categoryName)
 			if err != nil {
-				return fmt.Errorf("failed to insert category: %w", err)
+				return 0, fmt.Errorf("failed to insert category: %w", err)
 			}
 			id, err := res.LastInsertId()
 			if err != nil {
-				return fmt.Errorf("failed to get category id: %w", err)
+				return 0, fmt.Errorf("failed to get category id: %w", err)
 			}
-			*categoryID = int(id)
+			categoryID = int(id)
 		} else {
-			return fmt.Errorf("failed to get category id: %w", err)
+			return 0, fmt.Errorf("failed to get category id: %w", err)
 		}
 	}
-	return nil
+	return categoryID, nil
 }
 
 func (i *itemRepository) SearchByKeyword(ctx context.Context, keyword string) (*sql.Rows, error) {
