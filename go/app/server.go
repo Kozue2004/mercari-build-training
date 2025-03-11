@@ -98,7 +98,7 @@ type AddItemResponse struct {
 }
 
 // parseAddItemRequest parses and validates the request to add an item.
-func parseAddItemRequest(r *http.Request) (*AddItemRequest, []byte, error) {
+func parseAddItemRequest(r *http.Request) (*AddItemRequest, []byte, string, error) {
 	req := &AddItemRequest{
 		Name:     r.FormValue("name"),
 		Category: r.FormValue("category"), // STEP 4-2: add a category field
@@ -108,39 +108,39 @@ func parseAddItemRequest(r *http.Request) (*AddItemRequest, []byte, error) {
 	err := r.ParseMultipartForm(10 << 20)
 	if err != nil {
 		fmt.Println("Failed to parse form data:", err)
-		return nil, nil, fmt.Errorf("failed to parse form data: %w", err)
+		return nil, nil, "", fmt.Errorf("failed to parse form data: %w", err)
 	}
 
-	file, _, err := r.FormFile("image")
+	file, header, err := r.FormFile("image")
 	if err != nil {
-		return nil, nil, errors.New("image file is required")
+		return nil, nil, "", errors.New("image file is required")
 	}
 	defer file.Close()
 
 	// validate the request
 	if req.Name == "" {
-		return nil, nil, errors.New("name is required")
+		return nil, nil, "", errors.New("name is required")
 	}
 
 	// STEP 4-2: validate the category field
 	if req.Category == "" {
-		return nil, nil, errors.New("category is required")
+		return nil, nil, "", errors.New("category is required")
 	}
 
 	// STEP 4-4: validate the image field
 	imageData, err := io.ReadAll(file)
 	if err != nil {
-		return nil, nil, errors.New("image is required")
+		return nil, nil, "", errors.New("imagename is required")
 	}
 
-	return req, imageData, nil
+	return req, imageData, header.Filename, nil
 }
 
 // AddItem is a handler to add a new item for POST /items .
 func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	req, imageData, err := parseAddItemRequest(r)
+	req, imageData, filename, err := parseAddItemRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -155,8 +155,7 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//get category_id
-	var categoryID int
-	err = s.itemRepo.GetCategoryID(ctx, req.Category, &categoryID)
+	categoryID, err := s.itemRepo.GetCategoryID(ctx, req.Category)
 	if err != nil {
 		http.Error(w, "failed to get category ID", http.StatusInternalServerError)
 		return
@@ -168,7 +167,7 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		Image:      filePath,   // STEP 4-4: add an image field
 
 	}
-	message := fmt.Sprintf("item received: %s", item.Name)
+	message := fmt.Sprintf("item received: %s,%s, %s", item.Name, req.Category, filename)
 	slog.Info(message)
 
 	// STEP 4-2: add an implementation to store an image
@@ -179,7 +178,7 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := AddItemResponse{Message: message}
+	resp := &AddItemResponse{Message: message}
 	err = json.NewEncoder(w).Encode(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -203,7 +202,6 @@ func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
 	resp := struct {
 		Items []Item `json:"items"`
 	}{Items: items}
-
 
 	err = json.NewEncoder(w).Encode(resp)
 	if err != nil {
@@ -232,7 +230,7 @@ func (s *Handlers) storeImage(image []byte) (filePath string, err error) {
 	}
 
 	// - store image
-	fmt.Println("Savin new image:", fileName)
+	slog.Info("Saving new image", "filename", fileName)
 	err = os.WriteFile(filePath, image, 0644)
 	if err != nil {
 		return "", fmt.Errorf("failed to save image: %w", err)
@@ -394,4 +392,3 @@ func (s *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
-

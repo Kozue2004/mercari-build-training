@@ -1,3 +1,4 @@
 *.json
 *.sqlite3
 db/mercari.sqlite3
+*.jpg
