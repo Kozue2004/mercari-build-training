@@ -270,8 +270,9 @@ func TestAddItemE2e(t *testing.T) {
 	type wants struct {
 		code     int
 		response struct {
-			Name     string
-			Category string
+			Name      string
+			Category  string
+			ImageName string
 		}
 	}
 	cases := map[string]struct {
@@ -283,7 +284,7 @@ func TestAddItemE2e(t *testing.T) {
 			args: map[string]string{
 				"name":     "used iphone 16e",
 				"category": "phone",
-				"image":    "dummy.png",
+				"image":    "dummy.jpg",
 			},
 			injector: func(m *MockItemRepository) {
 				gomock.InOrder(
@@ -294,11 +295,13 @@ func TestAddItemE2e(t *testing.T) {
 			wants: wants{
 				code: http.StatusOK,
 				response: struct {
-					Name     string
-					Category string
+					Name      string
+					Category  string
+					ImageName string
 				}{
-					Name:     "used iphone 16e",
-					Category: "phone",
+					Name:      "used iphone 16e",
+					Category:  "phone",
+					ImageName: "4b29735ca4495218624e7723bd28f56bb8c3938e21640cd7d8d0bf79360d5551.jpg",
 				},
 			},
 		},
@@ -306,7 +309,7 @@ func TestAddItemE2e(t *testing.T) {
 			args: map[string]string{
 				"name":     "",
 				"category": "phone",
-				"image":    "dummy.png",
+				"image":    "dummy.jpg",
 			},
 			injector: func(m *MockItemRepository) {
 				m.EXPECT().GetCategoryID(gomock.Any(), "phone").Return(0, fmt.Errorf("category not found"))
@@ -314,11 +317,13 @@ func TestAddItemE2e(t *testing.T) {
 			wants: wants{
 				code: http.StatusBadRequest,
 				response: struct {
-					Name     string
-					Category string
+					Name      string
+					Category  string
+					ImageName string
 				}{
-					Name:     "",
-					Category: "",
+					Name:      "",
+					Category:  "",
+					ImageName: "",
 				},
 			},
 		},
@@ -333,9 +338,9 @@ func TestAddItemE2e(t *testing.T) {
 			for k, v := range tt.args {
 				_ = writer.WriteField(k, v)
 			}
-			const testImageFileName = "dummy.png"
-			fileWriter, _ := writer.CreateFormFile("image", testImageFileName)
-			fileWriter.Write([]byte("duummy image content"))
+
+			fileWriter, _ := writer.CreateFormFile("image", tt.args["image"])
+			fileWriter.Write([]byte("dummy image content"))
 			writer.Close()
 
 			req := httptest.NewRequest("POST", "/items", &body)
@@ -359,19 +364,24 @@ func TestAddItemE2e(t *testing.T) {
 
 			// STEP 6-4: check inserted data
 			var id int
-			var name, category string
+			var name, category, imagename string
 			if err := db.QueryRow(`
-				SELECT items.id, items.name, categories.name
+				SELECT items.id, items.name, categories.name, items.image_name
 				FROM items
 				JOIN categories ON items.category_id = categories.id
-				WHERE items.name = ?`, tt.args["name"]).Scan(&id, &name, &category); err != nil {
+				WHERE items.name = ?`, tt.args["name"]).Scan(&id, &name, &category, &imagename); err != nil {
 				t.Fatalf("failed to retrieve inserted  item: %v", err)
 			}
 
+			if imagename == "" {
+				t.Fatalf("expected image_name to be set, but got empty")
+			}
+
 			if diff := cmp.Diff(tt.wants.response, struct {
-				Name     string
-				Category string
-			}{name, category}); diff != "" {
+				Name      string
+				Category  string
+				ImageName string
+			}{name, category, imagename}); diff != "" {
 				t.Errorf("unexpectef response (-want +got):\n%s", diff)
 			}
 		})
