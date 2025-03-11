@@ -1,15 +1,3 @@
-#STEP7-5
-FROM alpine
-
-RUN apk add --no-cache go
-
-RUN addgroup -S mercari && adduser -S trainee -G mercari
-RUN chown -R trainee:mercari /path/to/db
-
-USER trainee
-
-CMD ["go", "version"]
-
 #STEP7-6
 FROM golang:1.24-alpine 
 
@@ -27,8 +15,7 @@ RUN CGO_ENABLED=1 go build -o myapp cmd/api/main.go
 
 RUN addgroup -S mercari && adduser -S trainee -G mercari
 
-RUN mkdir -p app/db/ && chown -R trainee:mercari /app/db
-RUN chown -R trainee:mercari db
+RUN chown -R trainee:mercari db images
 
 USER trainee
 EXPOSE 9000
