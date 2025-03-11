@@ -339,7 +339,7 @@ func TestAddItemE2e(t *testing.T) {
 				_ = writer.WriteField(k, v)
 			}
 
-			fileWriter, _ := writer.CreateFormFile("image", "dummy.jpg")
+			fileWriter, _ := writer.CreateFormFile("image", tt.args["image"])
 			fileWriter.Write([]byte("dummy image content"))
 			writer.Close()
 
